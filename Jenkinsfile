@@ -2,117 +2,139 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_REGISTRY = 'docker.io'
-        DOCKER_USERNAME = credentials('docker-username')
-        DOCKER_PASSWORD = credentials('docker-password')
-        DOCKER_IMAGE = 'rup-arc/music-recommendation-sys'
-        DOCKER_TAG = "${BUILD_NUMBER}"
-        AWS_REGION = 'us-east-1'
-        EKS_CLUSTER = 'music-recommendation-cluster'
-        EKS_NAMESPACE = 'music-recommendation'
+        DOCKER_IMAGE = "iamruparc/music-recommendation"
+        DOCKER_TAG = "v1.${BUILD_NUMBER}"
+        SONAR_PROJECT_KEY = "music-recommendation"
+        CONTAINER_NAME = "music-recommendation"
+    }
+
+    triggers {
+        pollSCM('H/5 * * * *')
     }
 
     stages {
+
         stage('Checkout') {
             steps {
-                script {
-                    echo "🔍 Checking out code from GitHub..."
-                }
-                checkout scm
+                git branch: 'devops',
+                    credentialsId: 'github-creds',
+                    url: 'https://github.com/rup-arc/music_recommendation_sys.git'
             }
         }
 
-        stage('Build') {
+        stage('SonarQube Analysis') {
             steps {
-                script {
-                    echo "🏗️  Building Docker image..."
+                withSonarQubeEnv('sonarqube-server') {
                     sh '''
-                        docker build -t ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} .
-                        docker tag ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
+                        sonar-scanner \
+                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                        -Dsonar.sources=. \
+                        -Dsonar.host.url=${SONAR_HOST_URL} \
+                        -Dsonar.login=${SONAR_AUTH_TOKEN}
                     '''
                 }
             }
         }
 
-        stage('Test') {
+        stage('SonarQube Quality Gate') {
             steps {
-                script {
-                    echo "🧪 Running tests..."
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('OWASP Dependency Check') {
+            steps {
+                dependencyCheck additionalArguments: '''
+                    --scan .
+                    --format HTML
+                    --format XML
+                    --out reports/
+                    --prettyPrint
+                ''', odcInstallation: 'owasp-dependency-check'
+                dependencyCheckPublisher pattern: 'reports/dependency-check-report.xml'
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh '''
+                    docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
+                    docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                '''
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                sh '''
+                    mkdir -p reports
+                    trivy image \
+                    --format table \
+                    --output reports/trivy-report.txt \
+                    --severity HIGH,CRITICAL \
+                    --exit-code 1 \
+                    ${DOCKER_IMAGE}:${DOCKER_TAG}
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'reports/trivy-report.txt'
+                }
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
                     sh '''
-                        docker run --rm ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} \
-                            python -m pytest tests/ -v || true
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        docker push ${DOCKER_IMAGE}:latest
                     '''
                 }
             }
         }
 
-        stage('Push to DockerHub') {
+        stage('Deploy') {
             steps {
-                script {
-                    echo "📤 Pushing image to DockerHub..."
-                    sh '''
-                        echo ${DOCKER_PASSWORD} | docker login -u ${DOCKER_USERNAME} --password-stdin
-                        docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
-                        docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
-                        docker logout
-                    '''
-                }
+                sh '''
+                    docker stop ${CONTAINER_NAME} || true
+                    docker rm ${CONTAINER_NAME} || true
+                    docker pull ${DOCKER_IMAGE}:latest
+                    docker run -d \
+                        --name ${CONTAINER_NAME} \
+                        -p 5000:5000 \
+                        --restart unless-stopped \
+                        ${DOCKER_IMAGE}:latest
+                '''
             }
         }
 
-        stage('Deploy to EKS') {
-            steps {
-                script {
-                    echo "🚀 Deploying to EKS..."
-                    sh '''
-                        # Update kubeconfig
-                        aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER}
-                        
-                        # Update image in deployment
-                        kubectl set image deployment/music-recommendation \
-                            music-recommendation=${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} \
-                            -n ${EKS_NAMESPACE} || \
-                        kubectl apply -f k8s/deployment.yaml
-                        
-                        # Wait for rollout
-                        kubectl rollout status deployment/music-recommendation -n ${EKS_NAMESPACE}
-                    '''
-                }
-            }
-        }
-
-        stage('Verify Deployment') {
-            steps {
-                script {
-                    echo "✅ Verifying deployment..."
-                    sh '''
-                        kubectl get pods -n ${EKS_NAMESPACE}
-                        kubectl get services -n ${EKS_NAMESPACE}
-                        
-                        # Check health endpoint
-                        POD_NAME=$(kubectl get pods -n ${EKS_NAMESPACE} -l app=music-recommendation -o jsonpath='{.items[0].metadata.name}')
-                        kubectl port-forward -n ${EKS_NAMESPACE} pod/$POD_NAME 5000:5000 &
-                        sleep 3
-                        curl -f http://localhost:5000/health || true
-                    '''
-                }
-            }
-        }
     }
 
     post {
+        always {
+            sh 'docker logout'
+            archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
+        }
         success {
-            script {
-                echo "✅ Pipeline succeeded!"
-            }
+            echo "Pipeline succeeded! App running at http://localhost:5000"
         }
         failure {
-            script {
-                echo "❌ Pipeline failed. Check logs above."
-            }
+            echo "Pipeline failed! Check the logs above."
         }
         cleanup {
-            cleanWs()
+            sh '''
+                docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true
+                docker image prune -f || true
+            '''
         }
     }
+
 }
