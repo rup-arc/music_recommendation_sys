@@ -142,3 +142,41 @@ jenkins_home/
 # Logs
 logs/
 *.log
+
+# Terraform local state files
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+*.tfstate.lock.info
+
+# Terraform plan files
+*.tfplan
+
+# Terraform directory
+.terraform/
+.terraform.lock.hcl
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# CLI configuration files
+.terraformrc
+terraform.rc
+
+# Local .env files
+.env
+.venv
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

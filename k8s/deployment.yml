@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: music-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: music-app
+  template:
+    metadata:
+      labels:
+        app: music-app
+    spec:
+      containers:
+      - name: app
+        image: iamruparc/music-recommendation:latest
+        ports:
+        - containerPort: 5000
+        env:
+        - name: S3_BUCKET
+          value: "YOUR_BUCKET_NAME_HERE"
+        - name: S3_KEY
+          value: "csv/songs.csv"
+        - name: AWS_REGION
+          value: "ap-south-1"
