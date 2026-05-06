@@ -1,26 +1,55 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: music-app
+  name: music-recommendation
+  namespace: music-app
+  labels:
+    app: music-recommendation
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: music-app
+      app: music-recommendation
   template:
     metadata:
       labels:
-        app: music-app
+        app: music-recommendation
     spec:
       containers:
-      - name: app
-        image: iamruparc/music-recommendation:latest
-        ports:
-        - containerPort: 5000
-        env:
-        - name: S3_BUCKET
-          value: "YOUR_BUCKET_NAME_HERE"
-        - name: S3_KEY
-          value: "csv/songs.csv"
-        - name: AWS_REGION
-          value: "ap-south-1"
+        - name: music-recommendation
+          image: iamruparc/music-recommendation:IMAGE_TAG
+          ports:
+            - containerPort: 5000
+          env:
+            - name: S3_BUCKET
+              value: "music-recommendation-data-93050490"
+            - name: S3_KEY
+              value: "songs_500_spotify.csv"
+            - name: AWS_REGION
+              value: "ap-south-1"
+            - name: LOG_GROUP
+              value: "/eks/music-recommendation"
+            - name: LOG_STREAM
+              value: "music-app-stream"
+          envFrom:
+            - secretRef:
+                name: music-app-secret
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 5

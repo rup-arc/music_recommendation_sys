@@ -1,4 +1,4 @@
-# S3 Bucket for CSV data (same bucket, different path)
+# S3 Bucket for CSV data
 resource "aws_s3_bucket" "data_bucket" {
   bucket = "${var.data_bucket_name}-${random_id.bucket_suffix.hex}"
   
@@ -97,11 +97,11 @@ resource "aws_iam_role_policy_attachment" "eks_node_policies" {
   policy_arn = each.value
 }
 
-# EKS Cluster
+# EKS Cluster with Kubernetes 1.30
 resource "aws_eks_cluster" "cluster" {
   name     = var.cluster_name
   role_arn = aws_iam_role.eks_cluster_role.arn
-  version  = "1.28"
+  version  = "1.30"
 
   vpc_config {
     subnet_ids              = module.vpc.private_subnets
@@ -110,12 +110,17 @@ resource "aws_eks_cluster" "cluster" {
     public_access_cidrs     = ["0.0.0.0/0"]
   }
 
+  # This will destroy and recreate the cluster
+  lifecycle {
+    create_before_destroy = true
+  }
+
   depends_on = [
     aws_iam_role_policy_attachment.eks_cluster_policies
   ]
 }
 
-# EKS Node Group
+# EKS Node Group for Kubernetes 1.30
 resource "aws_eks_node_group" "nodes" {
   cluster_name    = aws_eks_cluster.cluster.name
   node_group_name = "${var.cluster_name}-nodes"
@@ -129,6 +134,9 @@ resource "aws_eks_node_group" "nodes" {
   }
 
   instance_types = [var.instance_type]
+  
+  # AMI type for Kubernetes 1.30
+  ami_type = "AL2_x86_64"
 
   update_config {
     max_unavailable = 1
