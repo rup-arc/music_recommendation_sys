@@ -6,6 +6,9 @@ pipeline {
         DOCKER_TAG = "v1.${BUILD_NUMBER}"
         SONAR_PROJECT_KEY = "music-recommendation"
         CONTAINER_NAME = "music-recommendation"
+        AWS_REGION = "ap-south-1"
+        EKS_CLUSTER = "music-cluster"
+        K8S_NAMESPACE = "music-app"
     }
 
     triggers {
@@ -90,18 +93,39 @@ pipeline {
             }
         }
 
-        stage('Deploy') {
+        stage('Deploy to EKS') {
             steps {
-                sh '''
-                    docker stop ${CONTAINER_NAME} || true
-                    docker rm ${CONTAINER_NAME} || true
-                    docker pull ${DOCKER_IMAGE}:latest
-                    docker run -d \
-                        --name ${CONTAINER_NAME} \
-                        -p 5000:5000 \
-                        --restart unless-stopped \
-                        ${DOCKER_IMAGE}:latest
-                '''
+                withCredentials([
+                    file(credentialsId: 'env-file', variable: 'ENV_FILE')
+                ]) {
+                    sh '''
+                        # Connect Jenkins to EKS
+                        aws eks update-kubeconfig \
+                            --region ${AWS_REGION} \
+                            --name ${EKS_CLUSTER}
+
+                        # Create namespace if not exists
+                        kubectl create namespace ${K8S_NAMESPACE} \
+                            --dry-run=client -o yaml | kubectl apply -f -
+
+                        # Create secret from env file
+                        kubectl create secret generic music-app-secret \
+                            --from-env-file=$ENV_FILE \
+                            --namespace=${K8S_NAMESPACE} \
+                            --dry-run=client -o yaml | kubectl apply -f -
+
+                        # Update image tag in deployment
+                        sed -i "s|IMAGE_TAG|${DOCKER_TAG}|g" k8s/deployment.yaml
+
+                        # Apply K8s manifests
+                        kubectl apply -f k8s/ --namespace=${K8S_NAMESPACE}
+
+                        # Wait for rollout
+                        kubectl rollout status deployment/music-recommendation \
+                            --namespace=${K8S_NAMESPACE} \
+                            --timeout=300s
+                    '''
+                }
             }
         }
 
@@ -113,7 +137,7 @@ pipeline {
             archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
         }
         success {
-            echo "Pipeline succeeded! App running at http://localhost:5000"
+            echo "Pipeline succeeded! App deployed to EKS!"
         }
         failure {
             echo "Pipeline failed! Check the logs above."

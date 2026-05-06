@@ -180,3 +180,8 @@ terraform.rc
 *.swp
 *.swo
 *~
+
+echo "env-file.txt" >> .gitignore
+echo ".env" >> .gitignore
+echo "*.env" >> .gitignore
+env-file.txt
