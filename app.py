@@ -67,7 +67,7 @@ def load_songs_data():
             app.logger.warning(f"Failed to load from S3: {e}, falling back to local file", extra={'error': str(e)})
             # Fallback to local file
             if not os.path.exists('data/songs_500_spotify.csv'):
-                app.logger.error("Data file not found in S3 or locally", extra={'s3_bucket': S3_BUCKET, 'local_file': 'data/songs_500_final.csv'})
+                app.logger.error("Data file not found in S3 or locally", extra={'s3_bucket': S3_BUCKET, 'local_file': 'data/songs_500_spotify.csv'})
                 return False
             
             songs_df = pd.read_csv('data/songs_500_spotify.csv')
@@ -95,6 +95,7 @@ def load_songs_data():
         
     except Exception as e:
         app.logger.error(f"Error loading data: {e}", extra={'error': str(e)})
+        return False
 
 # Load data when app starts
 if load_songs_data():
@@ -206,10 +207,10 @@ def health_check():
             'moods': songs_df['mood'].value_counts().to_dict()
         })
     else:
-    return jsonify({
-        'status': 'error',
-        'message': 'Data not loaded'
-    }), 503
+        return jsonify({
+            'status': 'error',
+            'message': 'Data not loaded'
+        }), 503
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
