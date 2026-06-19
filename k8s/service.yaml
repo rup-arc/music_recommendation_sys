@@ -6,7 +6,7 @@ metadata:
 spec:
   selector:
     app: music-recommendation
-  type: LoadBalancer
+  type: ClusterIP
   ports:
     - protocol: TCP
       port: 80
