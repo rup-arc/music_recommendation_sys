@@ -9,9 +9,9 @@ from pythonjsonlogger import jsonlogger
 
 app = Flask(__name__)
 
-# S3 Configuration
-S3_BUCKET = os.getenv('S3_BUCKET', 'music-recommendation-data-production')
-S3_KEY = os.getenv('S3_KEY', 'songs_500_spotify.csv')
+# S3 Configuration (kept but not used in local mode)
+S3_BUCKET = os.getenv('S3_BUCKET', '')
+S3_KEY = os.getenv('S3_KEY', '')
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
 
 # CloudWatch Logging Setup
@@ -54,24 +54,16 @@ setup_logging()
 songs_df = None
 
 def load_songs_data():
-    """Load songs data from S3 or local CSV file"""
+    """Load songs data from local CSV file only"""
     global songs_df
     try:
-        # Try to load from S3 first
-        try:
-            s3_client = boto3.client('s3', region_name=AWS_REGION)
-            obj = s3_client.get_object(Bucket=S3_BUCKET, Key=S3_KEY)
-            songs_df = pd.read_csv(obj['Body'])
-            app.logger.info(f"Loaded {len(songs_df)} songs from S3 bucket {S3_BUCKET}", extra={'source': 's3', 'bucket': S3_BUCKET, 'count': len(songs_df)})
-        except Exception as e:
-            app.logger.warning(f"Failed to load from S3: {e}, falling back to local file", extra={'error': str(e)})
-            # Fallback to local file
-            if not os.path.exists('data/songs_500_spotify.csv'):
-                app.logger.error("Data file not found in S3 or locally", extra={'s3_bucket': S3_BUCKET, 'local_file': 'data/songs_500_spotify.csv'})
-                return False
-            
-            songs_df = pd.read_csv('data/songs_500_spotify.csv')
-            app.logger.info(f"Loaded {len(songs_df)} songs from local file", extra={'source': 'local', 'count': len(songs_df)})
+        # FORCE LOCAL MODE ONLY (no S3)
+        if not os.path.exists('data/songs_500_spotify.csv'):
+            app.logger.error("Local data file missing")
+            return False
+
+        songs_df = pd.read_csv('data/songs_500_spotify.csv')
+        app.logger.info(f"Loaded {len(songs_df)} songs from local file", extra={'source': 'local'})
         
         # Extract mood from genre
         songs_df['mood'] = songs_df['Genre'].apply(
