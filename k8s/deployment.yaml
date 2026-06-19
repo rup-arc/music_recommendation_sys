@@ -17,23 +17,10 @@ spec:
     spec:
       containers:
         - name: music-recommendation
-          image: iamruparc/music-recommendation:IMAGE_TAG
+          image: iamruparc/music-recommendation:v1.45
+          imagePullPolicy: Always
           ports:
             - containerPort: 5000
-          env:
-            - name: S3_BUCKET
-              value: "music-recommendation-data-93050490"
-            - name: S3_KEY
-              value: "songs_500_spotify.csv"
-            - name: AWS_REGION
-              value: "ap-south-1"
-            - name: LOG_GROUP
-              value: "/eks/music-recommendation"
-            - name: LOG_STREAM
-              value: "music-app-stream"
-          envFrom:
-            - secretRef:
-                name: music-app-secret
           resources:
             requests:
               memory: "256Mi"
@@ -51,5 +38,5 @@ spec:
             httpGet:
               path: /health
               port: 5000
-            initialDelaySeconds: 15
+            initialDelaySeconds: 10
             periodSeconds: 5
